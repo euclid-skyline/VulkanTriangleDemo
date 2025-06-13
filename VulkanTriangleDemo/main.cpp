@@ -84,6 +84,7 @@ private:
     std::vector<VkImage> swapChainImages;
     VkFormat swapChainImageFormat;
     VkExtent2D swapChainExtent;
+    std::vector<VkImageView> swapChainImageViews;
 
     void initWindow() {
         glfwInit();         // initializes the GLFW library
@@ -101,6 +102,7 @@ private:
         pickPhysicalDevice();
         createLogicalDevice();
         createSwapChain();
+        createImageViews();
     }
 
     void mainLoop() {
@@ -111,19 +113,23 @@ private:
     }
 
     void cleanup() {
-        vkDestroySwapchainKHR(device, swapChain, nullptr);
-        vkDestroyDevice(device, nullptr);
+		for (auto imageView : swapChainImageViews) {    // Clean up image views
+            vkDestroyImageView(device, imageView, nullptr);
+        }
 
-        if (enableValidationLayers) {
+		vkDestroySwapchainKHR(device, swapChain, nullptr);  // Clean up swap chain
+		vkDestroyDevice(device, nullptr);   // Clean up logical device
+
+		if (enableValidationLayers) { 		  // Clean up debug messenger if validation layers are enabled
             DestroyDebugUtilsMessengerEXT(instance, debugMessenger, nullptr);
         }
         
-        vkDestroySurfaceKHR(instance, surface, nullptr);
-        vkDestroyInstance(instance, nullptr);
+		vkDestroySurfaceKHR(instance, surface, nullptr);    // Clean up surface
+		vkDestroyInstance(instance, nullptr);       // Clean up Vulkan instance
 
-        glfwDestroyWindow(window);
+		glfwDestroyWindow(window);      // Clean up GLFW window
 
-        glfwTerminate();
+		glfwTerminate();        // terminates the GLFW library
     }
 
     void createInstance() {
@@ -250,6 +256,35 @@ private:
 
         swapChainImageFormat = surfaceFormat.format;
         swapChainExtent = extent;
+    }
+
+    void createImageViews() {
+        for (size_t i = 0; i < swapChainImages.size(); i++) {
+            VkImageViewCreateInfo createInfo{};
+            createInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+            createInfo.image = swapChainImages[i];
+
+            createInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+            createInfo.format = swapChainImageFormat;
+
+            createInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+            createInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+            createInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+            createInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+
+            createInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            createInfo.subresourceRange.baseMipLevel = 0;
+            createInfo.subresourceRange.levelCount = 1;
+            createInfo.subresourceRange.baseArrayLayer = 0;
+            createInfo.subresourceRange.layerCount = 1;
+
+            if (vkCreateImageView(device, &createInfo, nullptr, &swapChainImageViews[i]) != VK_SUCCESS) {
+                throw std::runtime_error("failed to create image views!");
+            }
+
+
+
+        }
     }
 
     VkSurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats) {
