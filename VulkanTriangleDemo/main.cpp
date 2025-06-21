@@ -10,6 +10,8 @@
 #include <cstdint> // Necessary for uint32_t
 #include <limits> // Necessary for std::numeric_limits
 #include <algorithm> // Necessary for std::clamp
+#include <fstream>
+#include <filesystem>
 
 
 const uint32_t WIDTH = 800;
@@ -103,6 +105,7 @@ private:
         createLogicalDevice();
         createSwapChain();
         createImageViews();
+        createGraphicsPipeline();
     }
 
     void mainLoop() {
@@ -209,7 +212,7 @@ private:
 
         uint32_t imageCount = swapChainSupport.capabilities.minImageCount + 1;
         if (swapChainSupport.capabilities.maxImageCount > 0 && imageCount > swapChainSupport.capabilities.maxImageCount) {
-            imageCount = swapChainSupport.capabilities.maxImageCount;
+			imageCount = swapChainSupport.capabilities.maxImageCount; // clamp to maxImageCount
         }
 
         VkSwapchainCreateInfoKHR createInfo{};
@@ -225,7 +228,6 @@ private:
 
         QueueFamilyIndices indices = findQueueFamilies(physicalDevice);
         uint32_t queueFamilyIndices[] = { indices.graphicsFamily.value(), indices.presentFamily.value() };
-
         if (indices.graphicsFamily != indices.presentFamily) {
             createInfo.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
             createInfo.queueFamilyIndexCount = 2;
@@ -237,7 +239,7 @@ private:
             createInfo.pQueueFamilyIndices = nullptr; // Optional
         }
 
-        createInfo.preTransform = swapChainSupport.capabilities.currentTransform;
+		createInfo.preTransform = swapChainSupport.capabilities.currentTransform; // We don't care about the transform, so we use the current transform
 
 		createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR; // We don't care about alpha blending
 
@@ -283,8 +285,52 @@ private:
             if (vkCreateImageView(device, &createInfo, nullptr, &swapChainImageViews[i]) != VK_SUCCESS) {
                 throw std::runtime_error("failed to create image views!");
             }
-
         }
+    }
+
+    void createGraphicsPipeline() {
+        auto vertShaderCode = readFile("shaders/vert.spv");
+        auto fragShaderCode = readFile("shaders/frag.spv");
+
+        VkShaderModule vertShaderModule = createShaderModule(vertShaderCode);
+        VkShaderModule fragShaderModule = createShaderModule(fragShaderCode);
+
+        VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
+        vertShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        vertShaderStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
+        vertShaderStageInfo.module = vertShaderModule;
+		vertShaderStageInfo.pName = "main"; // Entry point for the vertex shader
+
+        VkPipelineShaderStageCreateInfo fragShaderStageInfo{};
+        fragShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        fragShaderStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+        fragShaderStageInfo.module = fragShaderModule;
+		fragShaderStageInfo.pName = "main"; // Entry point for the fragment shader
+
+        VkPipelineShaderStageCreateInfo shaderStages[] = { vertShaderStageInfo, fragShaderStageInfo };
+
+        
+
+
+
+
+
+        vkDestroyShaderModule(device, fragShaderModule, nullptr);
+        vkDestroyShaderModule(device, vertShaderModule, nullptr);
+    }
+
+    VkShaderModule createShaderModule(const std::vector<char>& code) {
+        VkShaderModuleCreateInfo createInfo{};
+        createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+        createInfo.codeSize = code.size();
+        createInfo.pCode = reinterpret_cast<const uint32_t*>(code.data());
+
+        VkShaderModule shaderModule;
+        if (vkCreateShaderModule(device, &createInfo, nullptr, &shaderModule) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create shader module!");
+        }
+
+        return shaderModule;
     }
 
     VkSurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats) {
@@ -419,12 +465,6 @@ private:
             createInfo.pQueueCreateInfos = &queueCreateInfo;
             createInfo.queueCreateInfoCount = 1;
 
-            if (vkCreateDevice(physicalDevice, &createInfo, nullptr, &device) != VK_SUCCESS) {
-                throw std::runtime_error("failed to create logical device!");
-            }
-
-            vkGetDeviceQueue(device, indices.graphicsFamily.value(), 0, &graphicsQueue);
-
         } else {
             // If they are different, we will create two separate queues
 		    std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
@@ -442,12 +482,14 @@ private:
 
             createInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
             createInfo.pQueueCreateInfos = queueCreateInfos.data();
+        }
 
-            if (vkCreateDevice(physicalDevice, &createInfo, nullptr, &device) != VK_SUCCESS) {
-                throw std::runtime_error("failed to create logical device!");
-            }
+        if (vkCreateDevice(physicalDevice, &createInfo, nullptr, &device) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create logical device!");
+        }
 
-            vkGetDeviceQueue(device, indices.graphicsFamily.value(), 0, &graphicsQueue);
+        vkGetDeviceQueue(device, indices.graphicsFamily.value(), 0, &graphicsQueue);
+        if (indices.graphicsFamily.value() != indices.presentFamily.value()) {
             vkGetDeviceQueue(device, indices.presentFamily.value(), 0, &presentQueue);
         }
     }
@@ -473,11 +515,23 @@ private:
         const char** glfwExtensions;
         glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
 
+        // Print the GLFW extensions
+        std::cout << "GLFW requires " << glfwExtensionCount << " Vulkan extensions:\n";
+        for (uint32_t i = 0; i < glfwExtensionCount; i++) {
+            std::cout << "  " << i + 1 << ". " << glfwExtensions[i] << '\n';
+        }
+
         std::vector<const char*> extensions(glfwExtensions, glfwExtensions + glfwExtensionCount);
 
         if (enableValidationLayers) {
             extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
         }
+
+        // Print the required extensions
+        std::cout << "Required extension: " << extensions.size() << std::endl;
+        for (const char* extension : extensions) {
+            std::cout << " - " << extension << std::endl;
+		}
 
         return extensions;
     }
@@ -488,6 +542,29 @@ private:
         createInfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
         createInfo.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
         createInfo.pfnUserCallback = debugCallback;
+    }
+
+    static std::vector<char> readFile(const std::string& filename) {
+        std::cout << "Looking for shader script at: " << std::filesystem::absolute(filename) << std::endl;
+
+        // Open the file in binary mode and move the cursor to the end
+		std::ifstream file(filename, std::ios::ate | std::ios::binary); 
+
+        if (!file.is_open()) {
+            throw std::runtime_error("failed to open file!");
+        }
+
+		size_t fileSize = (size_t)file.tellg(); // Get the size of the file
+        std::vector<char> buffer(fileSize);
+
+		file.seekg(0); // Move the cursor back to the beginning of the file
+        file.read(buffer.data(), fileSize);
+
+        file.close();
+
+		std::cout << "\t" << filename << " file size: " << fileSize << " Bytes" << std::endl;
+        
+        return buffer;
     }
 
     static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
